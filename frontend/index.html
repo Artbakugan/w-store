@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>W Store — Спортивний магазин</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f6f9; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    h1 { color: #1a252f; text-align: center; margin-bottom: 20px; }
+    button { display: block; width: 100%; padding: 12px; font-size: 16px; font-weight: bold; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background-color: #219150; }
+    ul { list-style: none; padding: 0; margin-top: 20px; }
+    li { padding: 12px; border-bottom: 1px solid #eee; font-size: 16px; display: flex; justify-content: space-between; }
+    .badge { background: #eef2f5; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>W Store Catalog </h1>
+    <button id="loadBtn">Load items</button>
+    <ul id="itemsList"></ul>
+  </div>
+  <script>
+    const loadBtn = document.getElementById('loadBtn');
+    const itemsList = document.getElementById('itemsList');
+
+    loadBtn.addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:3000/items');
+        const data = await response.json();
+        itemsList.innerHTML = '';
+        data.forEach(item => {
+          const li = document.createElement('li');
+          li.innerHTML = `<span>${item.name}</span> <span class="badge">ID: ${item.id}</span>`;
+          itemsList.appendChild(li);
+        });
+      } catch (error) {
+        console.error('Помилка завантаження товарів:', error);
+        alert('Не вдалося завантажити дані з бекенду!');
+      }
+    });
+  </script>
+</body>
+</html>
