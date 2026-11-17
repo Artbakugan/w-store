@@ -8,6 +8,10 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.send('API W Store працює');
+});
+
 app.get('/items', (req, res) => {
   db.all("SELECT * FROM items", [], (err, rows) => {
     if (err) {
