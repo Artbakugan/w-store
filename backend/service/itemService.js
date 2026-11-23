@@ -20,7 +20,7 @@ class ItemService {
       details.push({ field: 'name', message: "Назва товару є обов'язковою" });
     }
 
-    if (typeof data?.price !== 'number' || Number.isNaN(data.price) || data.price <= 0) {
+    if (!Number.isFinite(data?.price) || data.price <= 0) {
       details.push({ field: 'price', message: 'Ціна повинна бути додатним числом' });
     }
 
@@ -54,9 +54,18 @@ class ItemService {
     return item;
   }
 
-  async createItem(payload) {
-    const validData = this.validateItemPayload(payload);
-    return this.itemRepository.create(validData);
+  async createItem(payload, idempotencyKey) {
+    const product = this.validateItemPayload(payload);
+    if (idempotencyKey === undefined) return this.itemRepository.create(product);
+
+    const saved = await this.itemRepository.createIdempotent(idempotencyKey, product);
+    if (saved.name !== product.name || saved.price !== product.price ||
+        saved.stockQuantity !== product.stockQuantity) {
+      throw new ApiError(409, 'idempotency_conflict', 'IDEMPOTENCY_KEY_CONFLICT', [
+        { field: 'Idempotency-Key', message: 'Цей ключ уже використано для іншого товару' },
+      ]);
+    }
+    return saved;
   }
 
   async updateItem(id, payload) {

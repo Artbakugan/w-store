@@ -7,3 +7,7 @@
 Контракт REST API описано у специфікації OpenAPI 3.0: [docs/api/openapi.yaml](docs/api/openapi.yaml).
 
 ![Swagger Editor Preview](docs/api/swagger_screenshot.png)
+
+## Docker Compose
+
+[Практична робота №6](docs/lab6/README.md) описує запуск W Store з PostgreSQL і перевірку контейнерів.

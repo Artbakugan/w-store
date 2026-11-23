@@ -9,31 +9,68 @@ servers:
 
 paths:
   /health:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
     get:
       summary: Перевірка стану сервера
       responses:
         '200':
           description: Сервер працює
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
-            text/plain:
+            application/json:
               schema:
-                type: string
-                example: ok
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '503':
+          description: Перевірка з’єднання з PostgreSQL завершилася помилкою
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: service_unavailable
+                code: UNAVAILABLE
+                details: []
+                requestId: 98b8f855-5266-4919-9b55-d5c9744c9569
 
   /items:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
     get:
       summary: Отримати список усіх товарів
       responses:
         '200':
           description: Список товарів
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/ItemResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     post:
       summary: Додати новий товар у каталог
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Повтор із тим самим ключем і даними повертає результат першого створення.
       requestBody:
         required: true
         content:
@@ -43,19 +80,38 @@ paths:
       responses:
         '201':
           description: Товар успішно створено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemResponse'
+                $ref: '#/components/schemas/CreatedItemResponse'
         '400':
           description: Помилка валідації
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+        '409':
+          description: Ключ ідемпотентності вже використано для інших даних
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
   /items/{id}:
     parameters:
+      - $ref: '#/components/parameters/RequestId'
       - name: id
         in: path
         required: true
@@ -67,16 +123,24 @@ paths:
       responses:
         '200':
           description: Деталі товару
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ItemResponse'
         '404':
           description: Товар не знайдено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     put:
       summary: Оновити інформацію про товар
       requestBody:
@@ -88,35 +152,92 @@ paths:
       responses:
         '200':
           description: Товар оновлено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ItemResponse'
         '400':
           description: Помилка валідації
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Товар не знайдено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     delete:
       summary: Видалити товар за ID
       responses:
         '204':
           description: Товар видалено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
         '404':
           description: Товар не знайдено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdHeader'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
 components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      description: Ідентифікатор запиту від клієнта. Якщо заголовок відсутній або порожній, сервер генерує UUID.
+      schema:
+        type: string
+
+  headers:
+    RequestIdHeader:
+      description: Ідентифікатор запиту, отриманий від клієнта або згенерований сервером. У JSON-відповіді з полем requestId значення збігаються.
+      required: true
+      schema:
+        type: string
+
+  responses:
+    TooManyRequests:
+      description: Перевищено спільний ліміт для маршрутів /items. За замовчуванням дозволено 8 запитів з однієї IP-адреси за 10 секунд в одному процесі сервера.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestIdHeader'
+        Retry-After:
+          description: Кількість секунд до кінця вікна ліміту, округлена вгору.
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 10
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: too_many_requests
+            code: RATE_LIMIT_EXCEEDED
+            details: []
+            requestId: 98b8f855-5266-4919-9b55-d5c9744c9569
+
   schemas:
     CreateItemRequest:
       type: object
@@ -167,12 +288,23 @@ components:
           type: integer
           example: 15
 
+    CreatedItemResponse:
+      allOf:
+        - $ref: '#/components/schemas/ItemResponse'
+        - type: object
+          required: [requestId]
+          properties:
+            requestId:
+              type: string
+              description: Ідентифікатор із заголовка X-Request-Id
+
     ErrorResponse:
       type: object
-      required:
-        - error
-        - code
+      required: [error, code, details, requestId]
       properties:
+        requestId:
+          type: string
+          description: Ідентифікатор із заголовка X-Request-Id
         error:
           type: string
           example: ValidationError

@@ -4,83 +4,44 @@ const { ApiError } = require('../service/itemService');
 function createItemRouter(itemService) {
   const router = express.Router();
 
-  const handleError = (res, err) => {
-    if (err instanceof ApiError) {
-      return res.status(err.status).json({
-        error: err.error,
-        code: err.code,
-        details: err.details,
-      });
+  router.param('id', (req, _res, next, value) => {
+    const id = Number(value);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return next(new ApiError(400, 'ValidationError', 'INVALID_ID', [
+        { field: 'id', message: 'Некоректний ID товару' },
+      ]));
     }
-    console.error(err);
-    return res.status(500).json({
-      error: 'InternalServerError',
-      code: 'INTERNAL_ERROR',
-      details: [],
-    });
-  };
+    req.itemId = id;
+    next();
+  });
 
-  router.get('/', async (req, res) => {
-    try {
-      const items = await itemService.getAllItems();
-      res.status(200).json(items);
-    } catch (err) {
-      handleError(res, err);
-    }
+  router.get('/', async (_req, res) => {
+    res.json(await itemService.getAllItems());
   });
 
   router.get('/:id', async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      if (!Number.isInteger(id) || id <= 0) {
-        throw new ApiError(400, 'ValidationError', 'INVALID_ID', [
-          { field: 'id', message: 'Некоректний ID товару' },
-        ]);
-      }
-      const item = await itemService.getItemById(id);
-      res.status(200).json(item);
-    } catch (err) {
-      handleError(res, err);
-    }
+    res.json(await itemService.getItemById(req.itemId));
   });
 
   router.post('/', async (req, res) => {
-    try {
-      const created = await itemService.createItem(req.body);
-      res.status(201).json(created);
-    } catch (err) {
-      handleError(res, err);
+    const key = req.get('Idempotency-Key');
+    if (!key?.trim()) {
+      throw new ApiError(400, 'idempotency_key_required', 'MISSING_IDEMPOTENCY_KEY', [
+        { field: 'Idempotency-Key', message: 'Заголовок Idempotency-Key є обов’язковим' },
+      ]);
     }
+
+    const created = await itemService.createItem(req.body, key);
+    res.status(201).json({ ...created, requestId: req.rid });
   });
 
   router.put('/:id', async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      if (!Number.isInteger(id) || id <= 0) {
-        throw new ApiError(400, 'ValidationError', 'INVALID_ID', [
-          { field: 'id', message: 'Некоректний ID товару' },
-        ]);
-      }
-      const updated = await itemService.updateItem(id, req.body);
-      res.status(200).json(updated);
-    } catch (err) {
-      handleError(res, err);
-    }
+    res.json(await itemService.updateItem(req.itemId, req.body));
   });
 
   router.delete('/:id', async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      if (!Number.isInteger(id) || id <= 0) {
-        throw new ApiError(400, 'ValidationError', 'INVALID_ID', [
-          { field: 'id', message: 'Некоректний ID товару' },
-        ]);
-      }
-      await itemService.deleteItem(id);
-      res.status(204).send();
-    } catch (err) {
-      handleError(res, err);
-    }
+    await itemService.deleteItem(req.itemId);
+    res.status(204).end();
   });
 
   return router;

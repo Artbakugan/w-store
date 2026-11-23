@@ -7,38 +7,171 @@
     body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f6f9; }
     .container { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
     h1 { color: #1a252f; text-align: center; margin-bottom: 20px; }
-    button { display: block; width: 100%; padding: 12px; font-size: 16px; font-weight: bold; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    .banner { display: none; padding: 12px; background: #fee2e2; color: #991b1b; border: 1px solid #f87171; border-radius: 6px; margin-bottom: 16px; font-weight: bold; text-align: center; }
+    .form-group { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    input { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    input[type="text"] { flex: 2; min-width: 150px; }
+    input[type="number"] { width: 85px; }
+    .btn-group { display: flex; gap: 8px; margin-bottom: 12px; }
+    button { display: block; width: 100%; padding: 12px; font-size: 15px; font-weight: bold; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; }
     button:hover { background-color: #219150; }
+    button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+    .btn-secondary { background-color: #2980b9; }
+    .btn-secondary:hover { background-color: #2471a3; }
+    .btn-test { background-color: #e67e22; }
+    .btn-test:hover { background-color: #d35400; }
     ul { list-style: none; padding: 0; margin-top: 20px; }
-    li { padding: 12px; border-bottom: 1px solid #eee; font-size: 16px; display: flex; justify-content: space-between; }
-    .badge { background: #eef2f5; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+    li { padding: 12px; border-bottom: 1px solid #eee; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .badge { background: #eef2f5; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 14px; }
+    .log { margin-top: 20px; background: #1e293b; color: #f8fafc; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>W Store Catalog </h1>
-    <button id="loadBtn">Load items</button>
-    <ul id="itemsList"></ul>
-  </div>
-  <script>
-    const loadBtn = document.getElementById('loadBtn');
-    const itemsList = document.getElementById('itemsList');
+    <h1>W Store Catalog</h1>
 
-    loadBtn.addEventListener('click', async () => {
-      try {
-        const response = await fetch('http://localhost:3000/items');
-        const data = await response.json();
-        itemsList.innerHTML = '';
-        data.forEach(item => {
-          const li = document.createElement('li');
-          li.innerHTML = `<span>${item.name}</span> <span class="badge">ID: ${item.id}</span>`;
-          itemsList.appendChild(li);
-        });
-      } catch (error) {
-        console.error('Помилка завантаження товарів:', error);
-        alert('Не вдалося завантажити дані з бекенду!');
+    <div id="degradedBanner" class="banner" role="status">
+      Сервіс перевантажено (Degraded Mode). Кнопки заблоковано на 5 секунд...
+    </div>
+
+    <div class="form-group">
+      <input id="itemName" type="text" placeholder="Назва товару" value="Кросівки Nike" />
+      <input id="itemPrice" type="number" placeholder="Ціна" value="3500" />
+      <input id="itemStock" type="number" placeholder="К-сть" value="10" />
+    </div>
+
+    <div class="btn-group">
+      <button id="createBtn">Додати товар</button>
+      <button id="doubleBtn" class="btn-test">Подвійний клік (Ідемпотентність)</button>
+    </div>
+
+    <button id="loadBtn" class="btn-secondary">Load items</button>
+
+    <ul id="itemsList"></ul>
+    <div id="log" class="log">Готово до роботи...</div>
+  </div>
+
+  <script src="./resilience.js"></script>
+  <script>
+    const API_URL = location.protocol === 'file:' ? 'http://localhost:3000/items' : '/items';
+    const demoFault = new URLSearchParams(location.search).get('fault');
+    const loadBtn = document.getElementById('loadBtn');
+    const createBtn = document.getElementById('createBtn');
+    const doubleBtn = document.getElementById('doubleBtn');
+    const itemsList = document.getElementById('itemsList');
+    const logEl = document.getElementById('log');
+    const bannerEl = document.getElementById('degradedBanner');
+    const pendingKeys = new Map();
+    let busy = false;
+
+    function log(message) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent = `[${time}] ${message}\n` + logEl.textContent;
+    }
+
+    function updateButtons() {
+      for (const button of [loadBtn, createBtn, doubleBtn]) {
+        button.disabled = busy || degradedMode.active;
       }
+    }
+
+    const degradedMode = createDegradedMode((active) => {
+      bannerEl.style.display = active ? 'block' : 'none';
+      updateButtons();
+      log(active ? 'Degraded Mode увімкнено після трьох збоїв поспіль.' : 'Degraded Mode вимкнено.');
     });
+
+    const fetchWithResilience = createResilientClient({
+      onRetry({ error, retry, waitMs, serverDelay }) {
+        const retryAfter = serverDelay ? `, Retry-After: ${serverDelay} мс` : '';
+        log(`${error.message}. Повтор №${retry} через ${waitMs} мс${retryAfter}.`);
+      },
+    });
+
+    function request(options = {}) {
+      const headers = new Headers(options.headers);
+      if (demoFault) headers.set('X-Demo-Fault', demoFault);
+      return fetchWithResilience(API_URL, { ...options, headers });
+    }
+
+    async function runAction(action) {
+      if (busy || degradedMode.active) return;
+
+      busy = true;
+      updateButtons();
+      try {
+        await action();
+        degradedMode.record(false);
+      } catch (error) {
+        log(`Помилка: ${error.message}`);
+        degradedMode.record(error.transient === true);
+      } finally {
+        busy = false;
+        updateButtons();
+      }
+    }
+
+    function getFormPayload() {
+      return {
+        name: document.getElementById('itemName').value.trim(),
+        price: Number(document.getElementById('itemPrice').value),
+        stockQuantity: Number(document.getElementById('itemStock').value),
+      };
+    }
+
+    async function createItems(count) {
+      const body = JSON.stringify(getFormPayload());
+      const key = pendingKeys.get(body) ?? crypto.randomUUID();
+      if (count === 2) log(`Два паралельні POST з ключем ${key}.`);
+
+      const options = {
+        method: 'POST',
+        body,
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      };
+      const results = await Promise.allSettled(
+        Array.from({ length: count }, () => request(options))
+      );
+      const transientFailure = results.find((result) =>
+        result.status === 'rejected' && result.reason.transient
+      );
+      if (results.every((result) => result.status === 'rejected') && transientFailure) {
+        pendingKeys.set(body, key);
+        throw transientFailure.reason;
+      }
+
+      pendingKeys.delete(body);
+      const success = results.some((result) => result.status === 'fulfilled');
+      if (!success) throw results[0].reason;
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { data, requestId } = result.value;
+          log(`POST #${index + 1} → 201, ID=${data.id}, «${data.name}», reqId=${requestId}`);
+        } else {
+          log(`POST #${index + 1} → ${result.reason.message}`);
+        }
+      });
+    }
+
+    loadBtn.addEventListener('click', () => runAction(async () => {
+      const { data, requestId } = await request();
+      const rows = data.map((item) => {
+        const row = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent = `${item.name} — ${item.price ?? 0} грн`;
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = `ID: ${item.id}`;
+        row.append(name, badge);
+        return row;
+      });
+      itemsList.replaceChildren(...rows);
+      log(`Завантажено товарів: ${data.length} (reqId: ${requestId}).`);
+    }));
+
+    createBtn.addEventListener('click', () => runAction(() => createItems(1)));
+    doubleBtn.addEventListener('click', () => runAction(() => createItems(2)));
   </script>
 </body>
 </html>

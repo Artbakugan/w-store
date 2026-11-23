@@ -1,0 +1,15 @@
+**
+!backend/
+!backend/package*.json
+!backend/*.js
+!backend/api/
+!backend/api/*.js
+!backend/domain/
+!backend/domain/*.js
+!backend/service/
+!backend/service/*.js
+!backend/tests/
+!backend/tests/*.js
+!frontend/
+!frontend/index.html
+!frontend/resilience.js

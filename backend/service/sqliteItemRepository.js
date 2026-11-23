@@ -36,6 +36,25 @@ class SqliteItemRepository {
     });
   }
 
+  async createIdempotent(key, product) {
+    await new Promise((resolve, reject) => {
+      const sql = `INSERT INTO item_idempotency (key, name, price, stockQuantity)
+                   VALUES (?, ?, ?, ?) ON CONFLICT(key) DO NOTHING`;
+      this.db.run(sql, [key, product.name, product.price, product.stockQuantity], (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+
+    return new Promise((resolve, reject) => {
+      const sql = 'SELECT itemId AS id, name, price, stockQuantity FROM item_idempotency WHERE key = ?';
+      this.db.get(sql, [key], (err, row) => {
+        if (err) return reject(err);
+        resolve(row);
+      });
+    });
+  }
+
   update(id, product) {
     return new Promise((resolve, reject) => {
       const sql = 'UPDATE items SET name = ?, price = ?, stockQuantity = ? WHERE id = ?';
